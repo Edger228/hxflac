@@ -181,14 +181,9 @@ class FLACHelper {
                 pcmData = ByteArray.fromBytes(decodeResult.data);
                 frameCount = Math.floor(decodeResult.data.length / (decodeResult.channels * 2));
                 
-            case 24:
+            default:
                 format = "short";
-                pcmData = FLACConverter.convert24To16Bit(decodeResult.data, decodeResult.channels); //cuz lime/openfl dont support 24bit PCM directly
-                frameCount = Math.floor(pcmData.length / (decodeResult.channels * 2));
-                
-            default: //for future flac formats or idk
-                format = "short";
-                pcmData = FLACConverter.convertTo16Bit(decodeResult.data, decodeResult.bitsPerSample, decodeResult.channels);
+                pcmData = FLACConverter.convertTo16Bit(decodeResult.data, decodeResult.bitsPerSample);
                 frameCount = Math.floor(pcmData.length / (decodeResult.channels * 2));
         }
 

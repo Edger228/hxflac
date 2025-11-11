@@ -12,18 +12,14 @@ class FLACConverter
         return Std.int((bitsPerSample + 7) / 8);
     
     #if openfl
-    public static function convertTo16Bit(data:Bytes, bitsPerSample:Int, channels:Int):ByteArray {
+    public static function convertTo16Bit(data:Bytes, bitsPerSample:Int):ByteArray {
         var result = new ByteArray();
         var bytesPerSample = getBytesPerSample(bitsPerSample);
         var sampleCount = Std.int(data.length / bytesPerSample);
         
         for (i in 0...sampleCount) {
             var sampleValue:Int = 0;
-            switch(bitsPerSample) {
-                case 8:
-                    sampleValue = data.get(i);
-                    sampleValue = (sampleValue - 128) << 8;
-                    
+            switch(bitsPerSample) {    
                 case 24:
                     var pos = i * 3;
                     var b1 = data.get(pos);
@@ -38,25 +34,6 @@ class FLACConverter
             }
             
             result.writeShort(sampleValue);
-        }
-        
-        return result;
-    }
-
-    public static function convert24To16Bit(data:Bytes, channels:Int):ByteArray {
-        var result = new ByteArray();
-        var sampleCount = Std.int(data.length / 3);
-        
-        for (i in 0...sampleCount) {
-            var pos = i * 3;
-            var b1 = data.get(pos);
-            var b2 = data.get(pos + 1);
-            var b3 = data.get(pos + 2);
-            var sample24 = b1 | (b2 << 8) | (b3 << 16);
-            
-            if (sample24 & 0x800000 != 0) sample24 |= 0xFF000000;
-            var sample16 = (sample24 >> 8) & 0xFFFF;
-            result.writeShort(sample16);
         }
         
         return result;
