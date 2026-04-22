@@ -62,6 +62,7 @@ class PlayState extends FlxState
     {
         super.update(elapsed);
 
+        #if FLX_KEYBOARD
         if (FlxG.keys.justPressed.S) 
         {
             if (isStreamingMode)
@@ -107,6 +108,7 @@ class PlayState extends FlxState
                     normalSound.play(true);
             }
         }
+        #end
 
         updateModeDisplay();
     }
