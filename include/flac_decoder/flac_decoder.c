@@ -368,7 +368,13 @@ static int is_native_flac(const unsigned char* input_data, size_t input_length) 
 }
 
 static int is_ogg_flac(const unsigned char* input_data, size_t input_length) {
+    #if defined(FLAC__HAS_OGG) && FLAC__HAS_OGG
     return input_length >= 4 && memcmp(input_data, "OggS", 4) == 0;
+    #else
+    (void)input_data;
+    (void)input_length;
+    return 0;
+    #endif
 }
 
 static int decode_flac_internal(
@@ -756,6 +762,96 @@ static FLAC__StreamDecoderWriteStatus session_write_callback(
     return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
 }
 
+static FLAC__StreamDecoderReadStatus session_read_callback(
+    const FLAC__StreamDecoder* decoder,
+    FLAC__byte buffer[],
+    size_t* bytes,
+    void* client_data
+) {
+    (void)decoder;
+
+    flac_stream_session* session = (flac_stream_session*)client_data;
+    flac_decoder_context* context = &session->context;
+
+    if (*bytes == 0) {
+        return FLAC__STREAM_DECODER_READ_STATUS_ABORT;
+    }
+
+    if (context->input_position >= context->input_length) {
+        *bytes = 0;
+        return FLAC__STREAM_DECODER_READ_STATUS_END_OF_STREAM;
+    }
+
+    {
+        size_t bytes_available = context->input_length - context->input_position;
+        size_t bytes_to_read = (*bytes < bytes_available) ? *bytes : bytes_available;
+
+        memcpy(buffer, context->input_data + context->input_position, bytes_to_read);
+        context->input_position += bytes_to_read;
+        *bytes = bytes_to_read;
+    }
+
+    return FLAC__STREAM_DECODER_READ_STATUS_CONTINUE;
+}
+
+static FLAC__StreamDecoderSeekStatus session_seek_callback(
+    const FLAC__StreamDecoder* decoder,
+    FLAC__uint64 absolute_byte_offset,
+    void* client_data
+) {
+    (void)decoder;
+
+    flac_stream_session* session = (flac_stream_session*)client_data;
+    flac_decoder_context* context = &session->context;
+
+    if (absolute_byte_offset > (FLAC__uint64)context->input_length) {
+        return FLAC__STREAM_DECODER_SEEK_STATUS_ERROR;
+    }
+
+    context->input_position = (size_t)absolute_byte_offset;
+    return FLAC__STREAM_DECODER_SEEK_STATUS_OK;
+}
+
+static FLAC__StreamDecoderTellStatus session_tell_callback(
+    const FLAC__StreamDecoder* decoder,
+    FLAC__uint64* absolute_byte_offset,
+    void* client_data
+) {
+    (void)decoder;
+
+    flac_stream_session* session = (flac_stream_session*)client_data;
+    flac_decoder_context* context = &session->context;
+
+    *absolute_byte_offset = (FLAC__uint64)context->input_position;
+    return FLAC__STREAM_DECODER_TELL_STATUS_OK;
+}
+
+static FLAC__StreamDecoderLengthStatus session_length_callback(
+    const FLAC__StreamDecoder* decoder,
+    FLAC__uint64* stream_length,
+    void* client_data
+) {
+    (void)decoder;
+
+    flac_stream_session* session = (flac_stream_session*)client_data;
+    flac_decoder_context* context = &session->context;
+
+    *stream_length = (FLAC__uint64)context->input_length;
+    return FLAC__STREAM_DECODER_LENGTH_STATUS_OK;
+}
+
+static FLAC__bool session_eof_callback(
+    const FLAC__StreamDecoder* decoder,
+    void* client_data
+) {
+    (void)decoder;
+
+    flac_stream_session* session = (flac_stream_session*)client_data;
+    flac_decoder_context* context = &session->context;
+
+    return context->input_position >= context->input_length;
+}
+
 static void session_metadata_callback(
     const FLAC__StreamDecoder* decoder,
     const FLAC__StreamMetadata* metadata,
@@ -819,16 +915,19 @@ flac_stream_session* flac_stream_open(
     const unsigned char* input_data,
     size_t input_length
 ) {
+    int native_flac;
+    int ogg_flac;
+
     if (!input_data || input_length == 0) {
         return NULL;
     }
 
-    int native_flac = is_native_flac(input_data, input_length);
-#if defined(FLAC__HAS_OGG) && FLAC__HAS_OGG
-    int ogg_flac = is_ogg_flac(input_data, input_length);
-#else
-    int ogg_flac = 0;
-#endif
+    native_flac = is_native_flac(input_data, input_length);
+    #if defined(FLAC__HAS_OGG) && FLAC__HAS_OGG
+    ogg_flac = is_ogg_flac(input_data, input_length);
+    #else
+    ogg_flac = 0;
+    #endif
 
     if (!native_flac && !ogg_flac) {
         return NULL;
@@ -849,55 +948,57 @@ flac_stream_session* flac_stream_open(
     session->context.input_length = input_length;
     session->context.input_position = 0;
 
-    FLAC__StreamDecoderInitStatus init_status;
+    {
+        FLAC__StreamDecoderInitStatus init_status;
 
-    #if defined(FLAC__HAS_OGG) && FLAC__HAS_OGG
-    if (ogg_flac) {
-        init_status = FLAC__stream_decoder_init_ogg_stream(
-            session->decoder,
-            read_callback,
-            seek_callback,
-            tell_callback,
-            length_callback,
-            eof_callback,
-            session_write_callback,
-            session_metadata_callback,
-            session_error_callback,
-            session
-        );
-    } else {
+        #if defined(FLAC__HAS_OGG) && FLAC__HAS_OGG
+        if (ogg_flac) {
+            init_status = FLAC__stream_decoder_init_ogg_stream(
+                session->decoder,
+                session_read_callback,
+                session_seek_callback,
+                session_tell_callback,
+                session_length_callback,
+                session_eof_callback,
+                session_write_callback,
+                session_metadata_callback,
+                session_error_callback,
+                session
+            );
+        } else {
+            init_status = FLAC__stream_decoder_init_stream(
+                session->decoder,
+                session_read_callback,
+                session_seek_callback,
+                session_tell_callback,
+                session_length_callback,
+                session_eof_callback,
+                session_write_callback,
+                session_metadata_callback,
+                session_error_callback,
+                session
+            );
+        }
+        #else
         init_status = FLAC__stream_decoder_init_stream(
             session->decoder,
-            read_callback,
-            seek_callback,
-            tell_callback,
-            length_callback,
-            eof_callback,
+            session_read_callback,
+            session_seek_callback,
+            session_tell_callback,
+            session_length_callback,
+            session_eof_callback,
             session_write_callback,
             session_metadata_callback,
             session_error_callback,
             session
         );
-    }
-    #else
-    init_status = FLAC__stream_decoder_init_stream(
-        session->decoder,
-        read_callback,
-        seek_callback,
-        tell_callback,
-        length_callback,
-        eof_callback,
-        session_write_callback,
-        session_metadata_callback,
-        session_error_callback,
-        session
-    );
-    #endif
+        #endif
 
-    if (init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
-        FLAC__stream_decoder_delete(session->decoder);
-        free(session);
-        return NULL;
+        if (init_status != FLAC__STREAM_DECODER_INIT_STATUS_OK) {
+            FLAC__stream_decoder_delete(session->decoder);
+            free(session);
+            return NULL;
+        }
     }
 
     session->initialized = 1;
@@ -909,10 +1010,12 @@ flac_stream_session* flac_stream_open(
             break;
         }
 
-        FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(session->decoder);
-        if (state == FLAC__STREAM_DECODER_END_OF_STREAM) {
-            session->finished = 1;
-            break;
+        {
+            FLAC__StreamDecoderState state = FLAC__stream_decoder_get_state(session->decoder);
+            if (state == FLAC__STREAM_DECODER_END_OF_STREAM) {
+                session->finished = 1;
+                break;
+            }
         }
     }
 

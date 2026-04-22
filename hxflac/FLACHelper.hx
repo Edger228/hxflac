@@ -7,7 +7,7 @@ import openfl.media.Sound;
 import openfl.utils.ByteArray;
 import openfl.utils.Assets;
 
-import hxflac.openfl.FLACStreamingSound;
+import hxflac.openfl.FLACStreamedSound;
 #end
 
 #if flixel
@@ -208,7 +208,7 @@ class FLACHelper {
         }
 
         try {
-            return new FLACStreamingSound(bytes);
+            return new FLACStreamedSound(bytes);
         } catch (e:Dynamic) {
             trace('FLACHelper: Failed to create streamed sound: $e');
             return null;
